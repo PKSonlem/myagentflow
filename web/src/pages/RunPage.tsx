@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ApiError, fetchRun, fetchRunEvents } from '../api/client'
+import { errorMessage, fetchRun, fetchRunEvents } from '../api/client'
 import type { Event, Run } from '../api/schemas'
 import { usePaged } from '../api/usePaged'
-import { ErrorBox, Status } from '../components/Status'
-import { formatDuration, formatTime } from '../format'
+import { ErrorBox } from '../components/ErrorBox'
+import { PagedStatus } from '../components/PagedStatus'
+import { Status } from '../components/Status'
+import { ERROR_BG, ERROR_COLOR } from '../components/theme'
+import { formatClock, formatDuration, formatTime, truncate } from '../format'
 
 export function RunPage() {
   const { id = '' } = useParams()
@@ -20,7 +23,7 @@ function RunView({ id }: { id: string }) {
     fetchRun(id, c.signal)
       .then(setRun)
       .catch((e: unknown) => {
-        if (!c.signal.aborted) setRunError(e instanceof ApiError ? e.message : 'Неожиданная ошибка')
+        if (!c.signal.aborted) setRunError(errorMessage(e))
       })
     return () => c.abort()
   }, [id])
@@ -49,16 +52,17 @@ function RunView({ id }: { id: string }) {
         </dl>
       )}
 
-      <h2>Таймлайн</h2>
-      {events.error && <ErrorBox message={events.error} />}
-      <ol style={{ listStyle: 'none', padding: 0 }}>
-        {events.items.map((e) => (
-          <EventRow key={e.seq} event={e} />
-        ))}
-      </ol>
-      {events.loading && <p>Загрузка…</p>}
-      {!events.loading && !events.error && events.items.length === 0 && <p>Событий нет.</p>}
-      {events.hasMore && !events.loading && <button onClick={events.loadMore}>Ещё</button>}
+      {!runError && (
+        <>
+          <h2>Таймлайн</h2>
+          <ol style={{ listStyle: 'none', padding: 0 }}>
+            {events.items.map((e) => (
+              <EventRow key={e.seq} event={e} />
+            ))}
+          </ol>
+          <PagedStatus paged={events} empty="Событий нет." />
+        </>
+      )}
     </>
   )
 }
@@ -67,20 +71,16 @@ function EventRow({ event }: { event: Event }) {
   const failed = event.hook_event_name === 'PostToolUseFailure'
   const errorText = failed && typeof event.payload.error === 'string' ? event.payload.error : null
   return (
-    <li style={{ borderLeft: `4px solid ${failed ? '#b00020' : '#ccc'}`, background: failed ? '#fdecee' : undefined, padding: '4px 10px', marginBottom: 4 }}>
+    <li style={{ borderLeft: `4px solid ${failed ? ERROR_COLOR : '#ccc'}`, background: failed ? ERROR_BG : undefined, padding: '4px 10px', marginBottom: 4 }}>
       <details>
         <summary>
-          <small>#{event.seq} {new Date(event.ts).toLocaleTimeString('ru-RU')}</small>{' '}
+          <small>#{event.seq} {formatClock(event.ts)}</small>{' '}
           <strong>{event.hook_event_name}</strong>
           {event.tool_name && <> · {event.tool_name}</>}
-          {errorText && <span style={{ color: '#b00020' }}> — {truncate(errorText, 160)}</span>}
+          {errorText && <span style={{ color: ERROR_COLOR }}> — {truncate(errorText, 160)}</span>}
         </summary>
         <pre style={{ overflow: 'auto', maxHeight: 400 }}>{JSON.stringify(event.payload, null, 2)}</pre>
       </details>
     </li>
   )
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError } from './client'
+import { errorMessage } from './client'
 
 interface Page<T, C> {
   items: T[]
@@ -38,7 +38,7 @@ export function usePaged<T, C>(fetchPage: (cursor: C | null, signal: AbortSignal
         })
         .catch((e: unknown) => {
           if (c.signal.aborted) return
-          setError(e instanceof ApiError ? e.message : 'Неожиданная ошибка')
+          setError(errorMessage(e))
         })
         .finally(() => {
           if (!c.signal.aborted) setLoading(false)

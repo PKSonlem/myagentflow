@@ -20,6 +20,19 @@ export class ApiError extends Error {
 
 const token = import.meta.env.VITE_API_TOKEN
 
+// Текст для пользователя; AbortError сюда не попадает, вызывающий отсекает его по signal.
+export function errorMessage(e: unknown): string {
+  return e instanceof ApiError ? e.message : 'Неожиданная ошибка'
+}
+
+function withQuery(path: string, params: Record<string, string | number | null | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== null && v !== undefined && v !== '') q.set(k, String(v))
+  }
+  return q.size > 0 ? `${path}?${q}` : path
+}
+
 async function request<S extends z.ZodType>(path: string, schema: S, signal?: AbortSignal): Promise<z.infer<S>> {
   if (!token) {
     throw new ApiError('Не задан VITE_API_TOKEN (см. web/.env.example)')
@@ -41,6 +54,7 @@ async function request<S extends z.ZodType>(path: string, schema: S, signal?: Ab
 
   if (!res.ok) {
     const err = errorResponseSchema.safeParse(body)
+    if (res.status === 404) throw new ApiError('Запуск не найден', 404)
     throw new ApiError(err.success ? err.data.error.message : `HTTP ${res.status}`, res.status)
   }
 
@@ -54,11 +68,7 @@ async function request<S extends z.ZodType>(path: string, schema: S, signal?: Ab
 }
 
 export function fetchRuns(params: { cursor?: string | null; limit?: number } = {}, signal?: AbortSignal): Promise<RunList> {
-  const q = new URLSearchParams()
-  if (params.cursor) q.set('cursor', params.cursor)
-  if (params.limit) q.set('limit', String(params.limit))
-  const qs = q.size > 0 ? `?${q}` : ''
-  return request(`/runs${qs}`, runListSchema, signal)
+  return request(withQuery('/runs', { cursor: params.cursor, limit: params.limit }), runListSchema, signal)
 }
 
 export function fetchRun(id: string, signal?: AbortSignal): Promise<Run> {
@@ -70,9 +80,6 @@ export function fetchRunEvents(
   params: { afterSeq?: number | null; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<EventList> {
-  const q = new URLSearchParams()
-  if (params.afterSeq) q.set('after_seq', String(params.afterSeq))
-  if (params.limit) q.set('limit', String(params.limit))
-  const qs = q.size > 0 ? `?${q}` : ''
-  return request(`/runs/${encodeURIComponent(id)}/events${qs}`, eventListSchema, signal)
+  const path = withQuery(`/runs/${encodeURIComponent(id)}/events`, { after_seq: params.afterSeq, limit: params.limit })
+  return request(path, eventListSchema, signal)
 }

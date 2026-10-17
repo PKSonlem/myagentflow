@@ -2,8 +2,9 @@ import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { fetchRuns } from '../api/client'
 import { usePaged } from '../api/usePaged'
-import { ErrorBox, Status } from '../components/Status'
-import { formatDuration, formatTime } from '../format'
+import { PagedStatus } from '../components/PagedStatus'
+import { Status } from '../components/Status'
+import { formatDuration, formatTime, truncate } from '../format'
 
 export function RunsPage() {
   const fetchPage = useCallback(
@@ -11,13 +12,12 @@ export function RunsPage() {
       fetchRuns({ cursor }, signal).then((r) => ({ items: r.items, next: r.next_cursor })),
     [],
   )
-  const { items, loading, error, hasMore, loadMore } = usePaged(fetchPage)
+  const runs = usePaged(fetchPage)
 
   return (
     <>
       <h1>Запуски</h1>
-      {error && <ErrorBox message={error} />}
-      {items.length > 0 && (
+      {runs.items.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -29,7 +29,7 @@ export function RunsPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map((r) => (
+            {runs.items.map((r) => (
               <tr key={r.id}>
                 <td><Status status={r.status} /></td>
                 <td><code>{r.cwd}</code></td>
@@ -41,13 +41,7 @@ export function RunsPage() {
           </tbody>
         </table>
       )}
-      {loading && <p>Загрузка…</p>}
-      {!loading && !error && items.length === 0 && <p>Запусков пока нет.</p>}
-      {hasMore && !loading && <button onClick={loadMore}>Ещё</button>}
+      <PagedStatus paged={runs} empty="Запусков пока нет." />
     </>
   )
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n)}…` : s
 }

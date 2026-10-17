@@ -13,3 +13,11 @@ export function formatDuration(ms: number | null): string {
   if (m > 0) return `${m} мин ${sec} с`
   return `${sec} с`
 }
+
+export function formatClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('ru-RU')
+}
+
+export function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}…` : s
+}
