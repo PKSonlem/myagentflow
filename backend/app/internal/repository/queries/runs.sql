@@ -23,3 +23,20 @@ WHERE id = @id;
 UPDATE runs
 SET task_text = @task_text
 WHERE id = @id AND task_text IS NULL;
+
+-- name: GetRun :one
+SELECT * FROM runs WHERE id = @id;
+
+-- name: ListRunsFirstPage :many
+-- Новые сверху. Порядок (started_at, id) совпадает с индексом runs_started_at_id_idx.
+SELECT * FROM runs
+ORDER BY started_at DESC, id DESC
+LIMIT @page_size;
+
+-- name: ListRunsAfter :many
+-- Keyset-пагинация: строки строго после курсора (started_at, id). Не OFFSET:
+-- новые запуски сверху не сдвигают уже выданные страницы.
+SELECT * FROM runs
+WHERE (started_at, id) < (@cursor_started_at::timestamptz, @cursor_id::uuid)
+ORDER BY started_at DESC, id DESC
+LIMIT @page_size;

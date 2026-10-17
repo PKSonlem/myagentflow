@@ -28,10 +28,9 @@ generate:
 	mkdir -p app/internal/api
 	go run $(OAPI_CODEGEN) -config api/oapi-codegen.yaml api/openapi.yaml
 
-# TS-типы для фронта. web/ пока без package.json (T4), каталог вывода создаётся здесь.
+# TS-типы для фронта: npm-скрипт из web/package.json (нужен npm install в web/).
 generate-ts:
-	mkdir -p ../web/src/api
-	npx --yes openapi-typescript@7 api/openapi.yaml -o ../web/src/api/schema.d.ts
+	npm --prefix ../web run generate:api
 
 lint-api:
 	npx --yes @redocly/cli@latest lint api/openapi.yaml

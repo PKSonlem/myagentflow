@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -34,5 +33,3 @@ func internalError(log *slog.Logger) func(http.ResponseWriter, *http.Request, er
 		writeError(w, http.StatusInternalServerError, api.ErrorCodeInternalError, "internal error")
 	}
 }
-
-var errNotImplemented = errors.New("not implemented")

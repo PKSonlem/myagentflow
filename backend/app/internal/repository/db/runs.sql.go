@@ -27,6 +27,103 @@ func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) error {
 	return err
 }
 
+const getRun = `-- name: GetRun :one
+SELECT id, session_id, cwd, task_text, status, started_at, finished_at FROM runs WHERE id = $1
+`
+
+func (q *Queries) GetRun(ctx context.Context, id pgtype.UUID) (Run, error) {
+	row := q.db.QueryRow(ctx, getRun, id)
+	var i Run
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Cwd,
+		&i.TaskText,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const listRunsAfter = `-- name: ListRunsAfter :many
+SELECT id, session_id, cwd, task_text, status, started_at, finished_at FROM runs
+WHERE (started_at, id) < ($1::timestamptz, $2::uuid)
+ORDER BY started_at DESC, id DESC
+LIMIT $3
+`
+
+type ListRunsAfterParams struct {
+	CursorStartedAt pgtype.Timestamptz `json:"cursor_started_at"`
+	CursorID        pgtype.UUID        `json:"cursor_id"`
+	PageSize        int32              `json:"page_size"`
+}
+
+// Keyset-пагинация: строки строго после курсора (started_at, id). Не OFFSET:
+// новые запуски сверху не сдвигают уже выданные страницы.
+func (q *Queries) ListRunsAfter(ctx context.Context, arg ListRunsAfterParams) ([]Run, error) {
+	rows, err := q.db.Query(ctx, listRunsAfter, arg.CursorStartedAt, arg.CursorID, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Run
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Cwd,
+			&i.TaskText,
+			&i.Status,
+			&i.StartedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRunsFirstPage = `-- name: ListRunsFirstPage :many
+SELECT id, session_id, cwd, task_text, status, started_at, finished_at FROM runs
+ORDER BY started_at DESC, id DESC
+LIMIT $1
+`
+
+// Новые сверху. Порядок (started_at, id) совпадает с индексом runs_started_at_id_idx.
+func (q *Queries) ListRunsFirstPage(ctx context.Context, pageSize int32) ([]Run, error) {
+	rows, err := q.db.Query(ctx, listRunsFirstPage, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Run
+	for rows.Next() {
+		var i Run
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Cwd,
+			&i.TaskText,
+			&i.Status,
+			&i.StartedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setRunTaskText = `-- name: SetRunTaskText :exec
 UPDATE runs
 SET task_text = $1

@@ -9,3 +9,10 @@ FROM events
 WHERE run_id = @run_id::uuid
 ON CONFLICT (run_id, hook_event_name, tool_use_id) WHERE tool_use_id IS NOT NULL
 DO NOTHING;
+
+-- name: ListRunEvents :many
+-- События запуска строго после after_seq по возрастанию seq. Идёт по events_run_id_seq_idx.
+SELECT * FROM events
+WHERE run_id = @run_id::uuid AND seq > @after_seq::bigint
+ORDER BY seq
+LIMIT @page_size;

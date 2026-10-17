@@ -49,3 +49,46 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (int64
 	}
 	return result.RowsAffected(), nil
 }
+
+const listRunEvents = `-- name: ListRunEvents :many
+SELECT id, run_id, seq, hook_event_name, tool_name, tool_use_id, ts, payload FROM events
+WHERE run_id = $1::uuid AND seq > $2::bigint
+ORDER BY seq
+LIMIT $3
+`
+
+type ListRunEventsParams struct {
+	RunID    pgtype.UUID `json:"run_id"`
+	AfterSeq int64       `json:"after_seq"`
+	PageSize int32       `json:"page_size"`
+}
+
+// События запуска строго после after_seq по возрастанию seq. Идёт по events_run_id_seq_idx.
+func (q *Queries) ListRunEvents(ctx context.Context, arg ListRunEventsParams) ([]Event, error) {
+	rows, err := q.db.Query(ctx, listRunEvents, arg.RunID, arg.AfterSeq, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.Seq,
+			&i.HookEventName,
+			&i.ToolName,
+			&i.ToolUseID,
+			&i.Ts,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
