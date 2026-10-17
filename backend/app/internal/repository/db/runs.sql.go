@@ -48,8 +48,8 @@ const upsertRun = `-- name: UpsertRun :one
 INSERT INTO runs (id, session_id, cwd, status, started_at)
 VALUES ($1, $2, $3, 'running', $4)
 ON CONFLICT (session_id) DO UPDATE SET
-    status      = CASE WHEN $5::boolean THEN 'running' ELSE runs.status END,
-    finished_at = CASE WHEN $5::boolean THEN NULL ELSE runs.finished_at END,
+    status      = 'running',
+    finished_at = NULL,
     cwd         = CASE WHEN runs.cwd = '' THEN EXCLUDED.cwd ELSE runs.cwd END
 RETURNING id
 `
@@ -59,20 +59,20 @@ type UpsertRunParams struct {
 	SessionID string             `json:"session_id"`
 	Cwd       string             `json:"cwd"`
 	StartedAt pgtype.Timestamptz `json:"started_at"`
-	Reopen    bool               `json:"reopen"`
 }
 
 // Находит Run по session_id или создаёт его. Возвращает id.
 // ON CONFLICT DO UPDATE берёт блокировку строки до конца транзакции: на ней держится
 // последовательная нумерация seq (параллельные запросы одного Run ждут друг друга).
-// reopen = true только для SessionStart: переводит Run обратно в running.
+// Любое событие переводит Run обратно в running
+// (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md);
+// SessionEnd затем закрывает его через FinishRun в той же транзакции.
 func (q *Queries) UpsertRun(ctx context.Context, arg UpsertRunParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertRun,
 		arg.ID,
 		arg.SessionID,
 		arg.Cwd,
 		arg.StartedAt,
-		arg.Reopen,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
