@@ -14,6 +14,7 @@ import (
 
 	"github.com/PKSonlem/myagentflow/backend/app/internal/httpapi"
 	"github.com/PKSonlem/myagentflow/backend/app/internal/ingest"
+	"github.com/PKSonlem/myagentflow/backend/app/internal/reader"
 )
 
 func main() {
@@ -45,7 +46,7 @@ func main() {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.Handle("/api/v1/", httpapi.Handler(httpapi.NewServer(ingest.NewService(pool)), token, log))
+	mux.Handle("/api/v1/", httpapi.Handler(httpapi.NewServer(ingest.NewService(pool), reader.NewService(pool)), token, log))
 
 	srv := &http.Server{
 		Addr:              addr,

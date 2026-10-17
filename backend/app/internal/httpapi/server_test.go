@@ -32,7 +32,7 @@ func post(t *testing.T, ing *fakeIngester, token, body string) *http.Response {
 
 func postAuth(t *testing.T, ing *fakeIngester, authHeader string, noAuth bool, body string) *http.Response {
 	t.Helper()
-	h := Handler(NewServer(ing), testToken, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := Handler(NewServer(ing, nil), testToken, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/hooks/claude", strings.NewReader(body))
 	if !noAuth {
 		req.Header.Set("Authorization", authHeader)
