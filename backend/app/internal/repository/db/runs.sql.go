@@ -64,7 +64,8 @@ type UpsertRunParams struct {
 // Находит Run по session_id или создаёт его. Возвращает id.
 // ON CONFLICT DO UPDATE берёт блокировку строки до конца транзакции: на ней держится
 // последовательная нумерация seq (параллельные запросы одного Run ждут друг друга).
-// Любое событие переводит Run обратно в running (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md);
+// Любое событие переводит Run обратно в running
+// (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md);
 // SessionEnd затем закрывает его через FinishRun в той же транзакции.
 func (q *Queries) UpsertRun(ctx context.Context, arg UpsertRunParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertRun,
