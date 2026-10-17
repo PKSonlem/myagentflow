@@ -123,10 +123,10 @@ func listAll(t *testing.T, svc *reader.Service, limit int) (ids []uuid.UUID, pag
 		for _, r := range runs {
 			ids = append(ids, r.ID)
 		}
-		if next == "" {
+		if next == nil {
 			return ids, pages
 		}
-		cursor = next
+		cursor = *next
 	}
 }
 
@@ -163,16 +163,16 @@ func TestListRuns_ExactPageBoundaryHasNoNextCursor(t *testing.T) {
 	send(t, "b", "Stop", "", base.Add(time.Second))
 
 	runs, next, err := reader.NewService(testPool).ListRuns(context.Background(), "", 2)
-	if err != nil || len(runs) != 2 || next != "" {
-		t.Fatalf("runs=%d next=%q err=%v, want 2 runs and empty cursor", len(runs), next, err)
+	if err != nil || len(runs) != 2 || next != nil {
+		t.Fatalf("runs=%d next=%v err=%v, want 2 runs and empty cursor", len(runs), next, err)
 	}
 }
 
 func TestListRuns_EmptyAndSameStartedAt(t *testing.T) {
 	clean(t)
 	svc := reader.NewService(testPool)
-	if runs, next, err := svc.ListRuns(context.Background(), "", 20); err != nil || len(runs) != 0 || next != "" {
-		t.Fatalf("empty: runs=%d next=%q err=%v", len(runs), next, err)
+	if runs, next, err := svc.ListRuns(context.Background(), "", 20); err != nil || len(runs) != 0 || next != nil {
+		t.Fatalf("empty: runs=%d next=%v err=%v", len(runs), next, err)
 	}
 
 	// одинаковый started_at: порядок решает id, ничего не теряется и не дублируется
@@ -201,15 +201,15 @@ func TestListRuns_StableWhenNewRunsArrive(t *testing.T) {
 	ctx := context.Background()
 
 	first, next, err := svc.ListRuns(ctx, "", 2)
-	if err != nil || next == "" {
-		t.Fatalf("first page: next=%q err=%v", next, err)
+	if err != nil || next == nil {
+		t.Fatalf("first page: next=%v err=%v", next, err)
 	}
 	send(t, "new1", "Stop", "", base.Add(time.Hour))
 	send(t, "new2", "Stop", "", base.Add(2*time.Hour))
 
-	second, next2, err := svc.ListRuns(ctx, next, 2)
-	if err != nil || next2 != "" || len(second) != 2 {
-		t.Fatalf("second page: n=%d next=%q err=%v", len(second), next2, err)
+	second, next2, err := svc.ListRuns(ctx, *next, 2)
+	if err != nil || next2 != nil || len(second) != 2 {
+		t.Fatalf("second page: n=%d next=%v err=%v", len(second), next2, err)
 	}
 	for _, r := range second {
 		for _, f := range first {

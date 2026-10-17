@@ -20,12 +20,22 @@ import (
 
 const baseURL = "/api/v1" // servers.url из openapi.yaml
 
+// Значения по умолчанию и границы страниц: зеркало parameters в openapi.yaml.
+// Сгенерированный код границы не проверяет, поэтому их проверяют хендлеры.
+const (
+	defaultRunsLimit   = 20
+	maxRunsLimit       = 100
+	defaultEventsLimit = 200
+	maxEventsLimit     = 1000
+)
+
 type Ingester interface {
 	Ingest(ctx context.Context, e ingest.Event) error
 }
 
+// Reader отдаёт данные для Read API; ErrNotFound и ErrInvalidCursor пакета reader превращаются в 404 и 400.
 type Reader interface {
-	ListRuns(ctx context.Context, cursor string, limit int) ([]reader.Run, string, error)
+	ListRuns(ctx context.Context, cursor string, limit int) ([]reader.Run, *string, error)
 	GetRun(ctx context.Context, id uuid.UUID) (reader.Run, error)
 	ListRunEvents(ctx context.Context, runID uuid.UUID, afterSeq int64, limit int) ([]reader.Event, *int64, error)
 }
@@ -71,23 +81,22 @@ func (s *Server) IngestClaudeHook(ctx context.Context, _ api.IngestClaudeHookReq
 }
 
 func (s *Server) ListRuns(ctx context.Context, req api.ListRunsRequestObject) (api.ListRunsResponseObject, error) {
-	limit := 20
+	limit := defaultRunsLimit
 	if req.Params.Limit != nil {
 		limit = *req.Params.Limit
 	}
-	if limit < 1 || limit > 100 {
-		return api.ListRuns400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(
-			errorResponse(api.ErrorCodeInvalidRequest, "поле limit должно быть от 1 до 100"))}, nil
+	if limit < 1 || limit > maxRunsLimit {
+		return api.ListRuns400JSONResponse{BadRequestJSONResponse: invalidRequest(
+			fmt.Sprintf("поле limit должно быть от 1 до %d", maxRunsLimit))}, nil
 	}
 	var cursor string
 	if req.Params.Cursor != nil {
 		cursor = *req.Params.Cursor
 	}
 
-	runs, next, err := s.reader.ListRuns(ctx, cursor, limit)
+	runs, nextCursor, err := s.reader.ListRuns(ctx, cursor, limit)
 	if errors.Is(err, reader.ErrInvalidCursor) {
-		return api.ListRuns400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(
-			errorResponse(api.ErrorCodeInvalidRequest, "поле cursor неверное"))}, nil
+		return api.ListRuns400JSONResponse{BadRequestJSONResponse: invalidRequest("поле cursor недействительно")}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -97,17 +106,14 @@ func (s *Server) ListRuns(ctx context.Context, req api.ListRunsRequestObject) (a
 	for i, r := range runs {
 		out.Items[i] = toAPIRun(r)
 	}
-	if next != "" {
-		out.NextCursor = &next
-	}
+	out.NextCursor = nextCursor
 	return api.ListRuns200JSONResponse(out), nil
 }
 
 func (s *Server) GetRun(ctx context.Context, req api.GetRunRequestObject) (api.GetRunResponseObject, error) {
 	r, err := s.reader.GetRun(ctx, req.Id)
 	if errors.Is(err, reader.ErrNotFound) {
-		return api.GetRun404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(
-			errorResponse(api.ErrorCodeNotFound, "запуск не найден"))}, nil
+		return api.GetRun404JSONResponse{NotFoundJSONResponse: runNotFound()}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -116,7 +122,7 @@ func (s *Server) GetRun(ctx context.Context, req api.GetRunRequestObject) (api.G
 }
 
 func (s *Server) ListRunEvents(ctx context.Context, req api.ListRunEventsRequestObject) (api.ListRunEventsResponseObject, error) {
-	limit := 200
+	limit := defaultEventsLimit
 	if req.Params.Limit != nil {
 		limit = *req.Params.Limit
 	}
@@ -124,39 +130,38 @@ func (s *Server) ListRunEvents(ctx context.Context, req api.ListRunEventsRequest
 	if req.Params.AfterSeq != nil {
 		afterSeq = *req.Params.AfterSeq
 	}
-	if limit < 1 || limit > 1000 {
-		return api.ListRunEvents400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(
-			errorResponse(api.ErrorCodeInvalidRequest, "поле limit должно быть от 1 до 1000"))}, nil
+	if limit < 1 || limit > maxEventsLimit {
+		return api.ListRunEvents400JSONResponse{BadRequestJSONResponse: invalidRequest(
+			fmt.Sprintf("поле limit должно быть от 1 до %d", maxEventsLimit))}, nil
 	}
 	if afterSeq < 0 {
-		return api.ListRunEvents400JSONResponse{BadRequestJSONResponse: api.BadRequestJSONResponse(
-			errorResponse(api.ErrorCodeInvalidRequest, "поле after_seq не может быть отрицательным"))}, nil
+		return api.ListRunEvents400JSONResponse{BadRequestJSONResponse: invalidRequest(
+			"поле after_seq не может быть отрицательным")}, nil
 	}
 
-	events, next, err := s.reader.ListRunEvents(ctx, req.Id, afterSeq, limit)
+	events, nextAfterSeq, err := s.reader.ListRunEvents(ctx, req.Id, afterSeq, limit)
 	if errors.Is(err, reader.ErrNotFound) {
-		return api.ListRunEvents404JSONResponse{NotFoundJSONResponse: api.NotFoundJSONResponse(
-			errorResponse(api.ErrorCodeNotFound, "запуск не найден"))}, nil
+		return api.ListRunEvents404JSONResponse{NotFoundJSONResponse: runNotFound()}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 
-	out := api.EventList{Items: make([]api.Event, len(events)), NextAfterSeq: next}
+	out := api.EventList{Items: make([]api.Event, len(events)), NextAfterSeq: nextAfterSeq}
 	for i, e := range events {
-		var payload map[string]interface{}
-		if err := json.Unmarshal(e.Payload, &payload); err != nil {
-			return nil, fmt.Errorf("event seq %d: bad payload: %w", e.Seq, err)
-		}
-		out.Items[i] = api.Event{
-			Seq:           e.Seq,
-			HookEventName: e.HookEventName,
-			ToolName:      e.ToolName,
-			Ts:            e.Ts,
-			Payload:       payload,
+		if out.Items[i], err = toAPIEvent(e); err != nil {
+			return nil, err
 		}
 	}
 	return api.ListRunEvents200JSONResponse(out), nil
+}
+
+func invalidRequest(msg string) api.BadRequestJSONResponse {
+	return api.BadRequestJSONResponse(errorResponse(api.ErrorCodeInvalidRequest, msg))
+}
+
+func runNotFound() api.NotFoundJSONResponse {
+	return api.NotFoundJSONResponse(errorResponse(api.ErrorCodeNotFound, "запуск не найден"))
 }
 
 func toAPIRun(r reader.Run) api.Run {
@@ -170,4 +175,18 @@ func toAPIRun(r reader.Run) api.Run {
 		FinishedAt: r.FinishedAt,
 		DurationMs: r.DurationMs,
 	}
+}
+
+func toAPIEvent(e reader.Event) (api.Event, error) {
+	var payload map[string]interface{}
+	if err := json.Unmarshal(e.Payload, &payload); err != nil {
+		return api.Event{}, fmt.Errorf("event seq %d: bad payload: %w", e.Seq, err)
+	}
+	return api.Event{
+		Seq:           e.Seq,
+		HookEventName: e.HookEventName,
+		ToolName:      e.ToolName,
+		Ts:            e.Ts,
+		Payload:       payload,
+	}, nil
 }

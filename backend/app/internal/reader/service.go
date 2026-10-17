@@ -23,6 +23,9 @@ var (
 	ErrInvalidCursor = errors.New("invalid cursor")
 )
 
+// Статусы Run, как в CHECK таблицы runs.
+const StatusFinished = "finished"
+
 type Run struct {
 	ID         uuid.UUID
 	SessionID  string
@@ -50,8 +53,8 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{q: db.New(pool)}
 }
 
-// ListRuns возвращает страницу запусков, новые сверху. nextCursor == "" на последней странице.
-func (s *Service) ListRuns(ctx context.Context, cursor string, limit int) (runs []Run, nextCursor string, err error) {
+// ListRuns возвращает страницу запусков, новые сверху. nextCursor == nil на последней странице.
+func (s *Service) ListRuns(ctx context.Context, cursor string, limit int) (runs []Run, nextCursor *string, err error) {
 	// limit+1: лишняя строка говорит, что есть следующая страница.
 	size := int32(limit + 1)
 	var rows []db.Run
@@ -61,7 +64,7 @@ func (s *Service) ListRuns(ctx context.Context, cursor string, limit int) (runs 
 		var startedAt time.Time
 		var id uuid.UUID
 		if startedAt, id, err = decodeCursor(cursor); err != nil {
-			return nil, "", err
+			return nil, nil, err
 		}
 		rows, err = s.q.ListRunsAfter(ctx, db.ListRunsAfterParams{
 			CursorStartedAt: pgtype.Timestamptz{Time: startedAt, Valid: true},
@@ -70,13 +73,14 @@ func (s *Service) ListRuns(ctx context.Context, cursor string, limit int) (runs 
 		})
 	}
 	if err != nil {
-		return nil, "", fmt.Errorf("list runs: %w", err)
+		return nil, nil, fmt.Errorf("list runs: %w", err)
 	}
 
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[limit-1]
-		nextCursor = encodeCursor(last.StartedAt.Time, last.ID.Bytes)
+		c := encodeCursor(last.StartedAt.Time, last.ID.Bytes)
+		nextCursor = &c
 	}
 	runs = make([]Run, len(rows))
 	for i, r := range rows {
@@ -140,7 +144,7 @@ func toRun(r db.Run) Run {
 	if r.FinishedAt.Valid {
 		f := r.FinishedAt.Time.UTC()
 		out.FinishedAt = &f
-		if r.Status == "finished" {
+		if r.Status == StatusFinished {
 			d := f.Sub(out.StartedAt).Milliseconds()
 			out.DurationMs = &d
 		}

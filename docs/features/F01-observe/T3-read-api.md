@@ -34,6 +34,32 @@
 - Признак следующей страницы: запрашивается `limit+1` строк. Ровно полная последняя страница даёт `next_cursor = null`.
 - `duration_ms` = `finished_at - started_at` в Go, только для `finished`; после resume снова `null`.
 - Границы `limit`, `after_seq` и неверный `cursor` проверяет хендлер (сгенерированный код границы не проверяет) и отвечает `400`. `GET /runs/{id}/events` для неизвестного Run это `404`, а не пустой список.
-- `EXPLAIN ANALYZE` на 100 тыс. запусков и 200 тыс. событий: все три запроса идут по индексам (`runs_started_at_id_idx`, `events_run_id_seq_idx`), без Seq Scan и Sort, до 0.3 мс.
+- `EXPLAIN ANALYZE` на 100 тыс. запусков и 200 тыс. событий: все три запроса идут по индексам (`runs_started_at_id_idx`, `events_run_id_seq_idx`), без Seq Scan и Sort, до 0.3 мс (вывод ниже).
 - Тесты в `reader` на Postgres (testcontainers): пагинация, стабильность при новых запусках, одинаковый `started_at`, 401/400/404, плюс валидация спеки и каждого ответа через `kin-openapi`.
 - Агент: `web/package.json` со скриптом `generate:api` (`openapi-typescript@7.13.0`), `make generate-ts` вызывает его. `schema.d.ts` после перегенерации не изменился.
+
+## EXPLAIN ANALYZE
+
+Временная БД: 100 тыс. запусков и 200 тыс. событий (200 запусков по 1000 событий), `ANALYZE`, затем `EXPLAIN (ANALYZE, BUFFERS)` запросов с `limit+1`:
+
+```text
+-- ListRunsFirstPage
+Limit (actual rows=21)
+  ->  Index Scan using runs_started_at_id_idx on runs (actual rows=21)   Buffers: shared hit=4
+Execution Time: 0.022 ms
+
+-- ListRunsAfter (курсор подставлен выражением, поэтому планировщик разбил сравнение строк на Index Cond по started_at + Filter; с параметрами из приложения условие идёт целиком)
+Limit (actual rows=21)
+  ->  Index Scan using runs_started_at_id_idx on runs (actual rows=21)   Buffers: shared hit=4
+        Index Cond: (started_at <= ...)
+        Filter: (ROW(started_at, id) < ROW(..., ...))
+Execution Time: 0.023 ms
+
+-- ListRunEvents (run_id, seq > 500)
+Limit (actual rows=201)
+  ->  Index Scan using events_run_id_seq_idx on events (actual rows=201)   Buffers: shared hit=211
+        Index Cond: ((run_id = ...) AND (seq > 500))
+Execution Time: 0.334 ms
+```
+
+Seq Scan и Sort отсутствуют (Seq Scan в `ListRunEvents` только в подзапросе, который выбирал тестовый `run_id`). Новый индекс не нужен.
