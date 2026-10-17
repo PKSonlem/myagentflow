@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: MyAgentFlow API
+  version: 1.0.0
+  description: API принимает события хуков Claude Code и отдаёт запуски (Run) и их события (Event)
+servers:
+  - url: http://localhost:8980/api/v1
+security:
+  - bearerAuth: []
+tags:
+  - name: hooks
+    description: Приём событий от Claude Code
+  - name: runs
+    description: Чтение запусков и их событий
+
+paths:
+  /hooks/claude:
+    post:
+      operationId: ingestClaudeHook
+      tags: [hooks]
+      summary: Принять событие хука Claude Code
+      description: >
+        Сохраняет событие. Повтор события с тем же ключом идемпотентности
+        (session_id, hook_event_name, tool_use_id) не создаёт дубликат и тоже возвращает 200.
+        Тело ответа пустое: Claude Code считает пустой 2xx успехом, а непустое тело
+        обязано быть JSON по схеме ответа хуков. Неизвестный hook_event_name сохраняется как есть.
+        Размер тела не больше 10 МиБ.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClaudeHookPayload"
+      responses:
+        "200":
+          description: Событие принято (в том числе повторное). Тело пустое
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /runs:
+    get:
+      operationId: listRuns
+      tags: [runs]
+      summary: Список запусков
+      description: >
+        Новые сверху: порядок по started_at по убыванию, при равенстве по id по убыванию.
+        Пагинация курсорная. Пустой список это 200 с пустым items.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: значение next_cursor из предыдущего ответа, непрозрачная строка
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: размер страницы
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Страница запусков
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /runs/{id}:
+    get:
+      operationId: getRun
+      tags: [runs]
+      summary: Один запуск
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Запуск
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /runs/{id}/events:
+    get:
+      operationId: listRunEvents
+      tags: [runs]
+      summary: События запуска
+      description: >
+        События по возрастанию seq, начиная после after_seq. Пустой список это 200 с пустым items.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: after_seq
+          in: query
+          required: false
+          description: вернуть события с seq строго больше этого значения
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          description: размер страницы
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        "200":
+          description: Страница событий
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    RunId:
+      name: id
+      in: path
+      required: true
+      description: идентификатор запуска
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Timestamp:
+      type: string
+      format: date-time
+      description: момент времени в формате RFC 3339, всегда в UTC (суффикс Z)
+      example: "2026-10-16T19:30:00Z"
+
+    ClaudeHookPayload:
+      type: object
+      description: >
+        Нативный payload хука Claude Code, его формат задаёт Claude Code. Обязательны только
+        поля, общие для всех событий. Остальные поля зависят от hook_event_name,
+        неизвестные поля допускаются.
+      required:
+        - session_id
+        - hook_event_name
+      additionalProperties: true
+      properties:
+        session_id:
+          type: string
+          description: идентификатор сессии Claude Code
+          example: abc123
+        hook_event_name:
+          type: string
+          description: имя сработавшего события, значение не ограничено enum, чтобы новые события не давали 400
+          example: PreToolUse
+        cwd:
+          type: string
+          description: рабочая папка сессии
+          example: /Users/kirill/Golang/myagentflow
+        transcript_path:
+          type: string
+          description: путь к файлу с историей диалога
+        permission_mode:
+          type: string
+          description: режим разрешений, приходит не во всех событиях
+          example: default
+        tool_name:
+          type: string
+          description: имя инструмента, только события с инструментами
+          example: Bash
+        tool_input:
+          type: object
+          description: аргументы вызова инструмента, структура зависит от инструмента
+          additionalProperties: true
+        tool_use_id:
+          type: string
+          description: идентификатор вызова инструмента
+          example: toolu_01ABC123
+        tool_response:
+          type: object
+          description: результат инструмента, только PostToolUse
+          additionalProperties: true
+        error:
+          type: string
+          description: текст ошибки, только PostToolUseFailure
+        prompt:
+          type: string
+          description: текст сообщения пользователя, только UserPromptSubmit
+        source:
+          type: string
+          description: причина старта сессии, только SessionStart
+          example: startup
+        reason:
+          type: string
+          description: причина завершения сессии, только SessionEnd
+          example: other
+
+    RunStatus:
+      type: string
+      enum: [running, finished]
+      description: >
+        running: сессия идёт, finished: пришёл SessionEnd. Возобновлённая сессия снова
+        становится running.
+
+    Run:
+      type: object
+      description: Один запуск агента, соответствует одной сессии Claude Code
+      required:
+        - id
+        - session_id
+        - status
+        - cwd
+        - task_text
+        - started_at
+        - finished_at
+        - duration_ms
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          description: идентификатор сессии Claude Code
+          example: abc123
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        cwd:
+          type: string
+          description: рабочая папка сессии
+        task_text:
+          type: string
+          nullable: true
+          description: текст первого сообщения пользователя, null пока его не было
+        started_at:
+          allOf:
+            - $ref: "#/components/schemas/Timestamp"
+          description: время получения сервером первого события сессии
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: время получения SessionEnd в RFC 3339, UTC (Z), null пока запуск идёт
+        duration_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: длительность в миллисекундах, считает сервер, null пока запуск running
+
+    RunList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Run"
+        next_cursor:
+          type: string
+          nullable: true
+          description: курсор следующей страницы, null на последней
+
+    Event:
+      type: object
+      description: Одна запись хронологии запуска, соответствует одному вызову хука
+      required:
+        - seq
+        - hook_event_name
+        - tool_name
+        - ts
+        - payload
+      properties:
+        seq:
+          type: integer
+          format: int64
+          description: порядковый номер внутри запуска, назначает сервер
+          example: 1
+        hook_event_name:
+          type: string
+          example: PreToolUse
+        tool_name:
+          type: string
+          nullable: true
+          description: имя инструмента, null у событий без инструмента
+        ts:
+          allOf:
+            - $ref: "#/components/schemas/Timestamp"
+          description: время получения события сервером
+        payload:
+          type: object
+          description: сохранённый payload хука без изменений
+          additionalProperties: true
+
+    EventList:
+      type: object
+      required: [items, next_after_seq]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Event"
+        next_after_seq:
+          type: integer
+          format: int64
+          nullable: true
+          description: seq последнего события на странице, null на последней странице
+
+    ErrorCode:
+      type: string
+      enum: [invalid_request, unauthorized, not_found, payload_too_large, internal_error]
+      description: машинно-читаемый код ошибки, по нему клиент выбирает поведение
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              $ref: "#/components/schemas/ErrorCode"
+            message:
+              type: string
+              description: описание ошибки для человека
+              example: "поле limit должно быть от 1 до 100"
+
+  responses:
+    BadRequest:
+      description: Запрос не прошёл валидацию. Тело не JSON, нет обязательного поля или неверный параметр
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Токен не передан или неверный
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Запрошенный запуск не найден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    PayloadTooLarge:
+      description: Тело запроса больше 10 МиБ
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Внутренняя ошибка сервера. Повторите запрос позже
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
