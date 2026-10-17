@@ -1,0 +1,37 @@
+# Секреты и локальные настройки (.env.example коммитится)
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# Редакторы и IDE
+.idea/
+.vscode/
+*.swp
+
+# Claude Code: локальные настройки и переписка
+.claude/settings.local.json
+
+# Go
+backend/bin/
+backend/tmp/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Docker: локальные данные Postgres, если смонтированы в папку
+backend/pgdata/
+backend/.data/
+
+# Node / web
+node_modules/
+web/dist/
+web/.vite/
+*.tsbuildinfo
+npm-debug.log*
+
+# Логи
+*.log
