@@ -166,7 +166,7 @@ func TestIngest_TwoStopsGiveTwoEvents(t *testing.T) {
 	}
 }
 
-func TestIngest_SessionEndFinishesAndSessionStartReopens(t *testing.T) {
+func TestIngest_SessionEndFinishesAndAnyEventReopens(t *testing.T) {
 	svc := newService(t)
 	mustIngest(t, svc, ev("s1", "SessionStart", ""))
 	mustIngest(t, svc, ev("s1", "SessionEnd", ""))
@@ -174,13 +174,8 @@ func TestIngest_SessionEndFinishesAndSessionStartReopens(t *testing.T) {
 		t.Fatalf("finished runs = %d, want 1", got)
 	}
 
-	// событие после SessionEnd (например Stop) Run не открывает
-	mustIngest(t, svc, ev("s1", "Stop", ""))
-	if got := count(t, "SELECT count(*) FROM runs WHERE status='finished'"); got != 1 {
-		t.Fatalf("Stop reopened the run")
-	}
-
-	mustIngest(t, svc, ev("s1", "SessionStart", ""))
+	// resume не шлёт SessionStart по http: Run открывает любое следующее событие
+	mustIngest(t, svc, ev("s1", "UserPromptSubmit", ""))
 	if got := count(t, "SELECT count(*) FROM runs WHERE status='running' AND finished_at IS NULL"); got != 1 {
 		t.Fatalf("running runs = %d, want 1", got)
 	}

@@ -56,7 +56,6 @@ func ingestTx(ctx context.Context, q *db.Queries, e Event) error {
 		SessionID: e.SessionID,
 		Cwd:       e.Cwd,
 		StartedAt: pgtype.Timestamptz{Time: e.ReceivedAt, Valid: true},
-		Reopen:    e.HookEventName == "SessionStart",
 	})
 	if err != nil {
 		return fmt.Errorf("upsert run: %w", err)

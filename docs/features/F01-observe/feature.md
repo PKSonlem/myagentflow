@@ -27,7 +27,7 @@ events(id, run_id, seq, hook_event_name, tool_name, tool_use_id NULL, ts, payloa
   -- PRIMARY KEY должен включать ts (задел под партиционирование)
 ```
 
-Run = одна сессия (`session_id`). Создаёт его любое первое событие сессии (`started_at` = время получения), закрывает только `SessionEnd`; `Stop` срабатывает после каждого ответа и остаётся обычным событием. Повторный `SessionStart` с тем же `session_id` (resume) снова переводит Run в `running` и сбрасывает `finished_at`.
+Run = одна сессия (`session_id`). Создаёт его любое первое событие сессии (`started_at` = время получения), закрывает только `SessionEnd`; `Stop` срабатывает после каждого ответа и остаётся обычным событием. Любое последующее событие с тем же `session_id` (resume) снова переводит Run в `running` и сбрасывает `finished_at`: при `--resume` `SessionStart` по http не приходит (см. `docs/notes/hooks-reality.md`).
 
 `events.ts` = время получения сервером (в payload хука своей метки времени нет).
 
