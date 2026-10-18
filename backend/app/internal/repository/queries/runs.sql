@@ -1,0 +1,46 @@
+-- name: UpsertRun :one
+-- Находит Run по session_id или создаёт его. Возвращает id.
+-- ON CONFLICT DO UPDATE берёт блокировку строки до конца транзакции: на ней держится
+-- последовательная нумерация seq (параллельные запросы одного Run ждут друг друга).
+-- Run не переоткрывается здесь: дубль события (его отбросит InsertEvent) не должен
+-- менять статус. Переоткрытие делает ReopenRun, только если событие реально записано.
+INSERT INTO runs (id, session_id, cwd, status, started_at)
+VALUES (@id, @session_id, @cwd, 'running', @started_at)
+ON CONFLICT (session_id) DO UPDATE SET
+    cwd         = CASE WHEN runs.cwd = '' THEN EXCLUDED.cwd ELSE runs.cwd END
+RETURNING id;
+
+-- name: ReopenRun :exec
+-- Новое событие в сессии переводит Run обратно в running
+-- (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md).
+UPDATE runs
+SET status = 'running', finished_at = NULL
+WHERE id = @id AND status <> 'running';
+
+-- name: FinishRun :exec
+UPDATE runs
+SET status = 'finished', finished_at = @finished_at
+WHERE id = @id;
+
+-- name: SetRunTaskText :exec
+-- Только первый UserPromptSubmit: если task_text уже есть, строка не меняется.
+UPDATE runs
+SET task_text = @task_text
+WHERE id = @id AND task_text IS NULL;
+
+-- name: GetRun :one
+SELECT * FROM runs WHERE id = @id;
+
+-- name: ListRunsFirstPage :many
+-- Новые сверху. Порядок (started_at, id) совпадает с индексом runs_started_at_id_idx.
+SELECT * FROM runs
+ORDER BY started_at DESC, id DESC
+LIMIT @page_size;
+
+-- name: ListRunsAfter :many
+-- Keyset-пагинация: строки строго после курсора (started_at, id). Не OFFSET:
+-- новые запуски сверху не сдвигают уже выданные страницы.
+SELECT * FROM runs
+WHERE (started_at, id) < (@cursor_started_at::timestamptz, @cursor_id::uuid)
+ORDER BY started_at DESC, id DESC
+LIMIT @page_size;
