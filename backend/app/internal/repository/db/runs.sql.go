@@ -124,6 +124,19 @@ func (q *Queries) ListRunsFirstPage(ctx context.Context, pageSize int32) ([]Run,
 	return items, nil
 }
 
+const reopenRun = `-- name: ReopenRun :exec
+UPDATE runs
+SET status = 'running', finished_at = NULL
+WHERE id = $1 AND status <> 'running'
+`
+
+// Новое событие в сессии переводит Run обратно в running
+// (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md).
+func (q *Queries) ReopenRun(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, reopenRun, id)
+	return err
+}
+
 const setRunTaskText = `-- name: SetRunTaskText :exec
 UPDATE runs
 SET task_text = $1
@@ -145,8 +158,6 @@ const upsertRun = `-- name: UpsertRun :one
 INSERT INTO runs (id, session_id, cwd, status, started_at)
 VALUES ($1, $2, $3, 'running', $4)
 ON CONFLICT (session_id) DO UPDATE SET
-    status      = 'running',
-    finished_at = NULL,
     cwd         = CASE WHEN runs.cwd = '' THEN EXCLUDED.cwd ELSE runs.cwd END
 RETURNING id
 `
@@ -161,9 +172,8 @@ type UpsertRunParams struct {
 // Находит Run по session_id или создаёт его. Возвращает id.
 // ON CONFLICT DO UPDATE берёт блокировку строки до конца транзакции: на ней держится
 // последовательная нумерация seq (параллельные запросы одного Run ждут друг друга).
-// Любое событие переводит Run обратно в running
-// (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md);
-// SessionEnd затем закрывает его через FinishRun в той же транзакции.
+// Run не переоткрывается здесь: дубль события (его отбросит InsertEvent) не должен
+// менять статус. Переоткрытие делает ReopenRun, только если событие реально записано.
 func (q *Queries) UpsertRun(ctx context.Context, arg UpsertRunParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertRun,
 		arg.ID,

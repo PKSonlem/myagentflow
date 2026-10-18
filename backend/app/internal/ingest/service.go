@@ -12,8 +12,8 @@ import (
 	"github.com/PKSonlem/myagentflow/backend/app/internal/repository/db"
 )
 
-// Event это результат адаптера claudecode: то, что нужно сохранить.
-type Event struct {
+// HookEvent это результат адаптера claudecode: то, что нужно сохранить.
+type HookEvent struct {
 	SessionID     string
 	HookEventName string
 	Cwd           string
@@ -33,8 +33,9 @@ func NewService(pool *pgxpool.Pool) *Service {
 }
 
 // Ingest сохраняет событие в одной транзакции:
-// UpsertRun (до всего: берёт блокировку Run) → SetRunTaskText / FinishRun → InsertEvent.
-func (s *Service) Ingest(ctx context.Context, e Event) error {
+// UpsertRun (до всего: берёт блокировку Run) → InsertEvent → SetRunTaskText / FinishRun / ReopenRun
+// (статус Run меняет только реально записанное событие, не дубль).
+func (s *Service) Ingest(ctx context.Context, e HookEvent) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -50,7 +51,7 @@ func (s *Service) Ingest(ctx context.Context, e Event) error {
 	return nil
 }
 
-func ingestTx(ctx context.Context, q *db.Queries, e Event) error {
+func ingestTx(ctx context.Context, q *db.Queries, e HookEvent) error {
 	runID, err := q.UpsertRun(ctx, db.UpsertRunParams{
 		ID:        newUUID(),
 		SessionID: e.SessionID,
@@ -59,6 +60,28 @@ func ingestTx(ctx context.Context, q *db.Queries, e Event) error {
 	})
 	if err != nil {
 		return fmt.Errorf("upsert run: %w", err)
+	}
+
+	inserted, err := q.InsertEvent(ctx, db.InsertEventParams{
+		ID:            newUUID(),
+		RunID:         runID,
+		HookEventName: e.HookEventName,
+		ToolName:      text(e.ToolName),
+		ToolUseID:     text(e.ToolUseID),
+		Ts:            pgtype.Timestamptz{Time: e.ReceivedAt, Valid: true},
+		Payload:       e.Payload,
+	})
+	if err != nil {
+		return fmt.Errorf("insert event: %w", err)
+	}
+	if inserted == 0 {
+		return nil // дубль: статус и task_text Run не трогаем
+	}
+
+	if e.HookEventName != "SessionEnd" {
+		if err := q.ReopenRun(ctx, runID); err != nil {
+			return fmt.Errorf("reopen run: %w", err)
+		}
 	}
 
 	switch e.HookEventName {
@@ -77,19 +100,6 @@ func ingestTx(ctx context.Context, q *db.Queries, e Event) error {
 	}
 	if err != nil {
 		return fmt.Errorf("update run: %w", err)
-	}
-
-	_, err = q.InsertEvent(ctx, db.InsertEventParams{
-		ID:            newUUID(),
-		RunID:         runID,
-		HookEventName: e.HookEventName,
-		ToolName:      text(e.ToolName),
-		ToolUseID:     text(e.ToolUseID),
-		Ts:            pgtype.Timestamptz{Time: e.ReceivedAt, Valid: true},
-		Payload:       e.Payload,
-	})
-	if err != nil {
-		return fmt.Errorf("insert event: %w", err)
 	}
 	return nil
 }

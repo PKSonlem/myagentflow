@@ -14,11 +14,11 @@ import (
 )
 
 type fakeIngester struct {
-	got []ingest.Event
+	got []ingest.HookEvent
 	err error
 }
 
-func (f *fakeIngester) Ingest(_ context.Context, e ingest.Event) error {
+func (f *fakeIngester) Ingest(_ context.Context, e ingest.HookEvent) error {
 	f.got = append(f.got, e)
 	return f.err
 }
@@ -67,6 +67,21 @@ func TestIngest_OKKeepsRawPayload(t *testing.T) {
 	}
 	if len(ing.got) != 1 || string(ing.got[0].Payload) != body {
 		t.Fatalf("payload must be stored unchanged: %+v", ing.got)
+	}
+}
+
+// tool_input и tool_response бывают не объектами (например, у MCP-инструментов).
+func TestIngest_NonObjectToolFields(t *testing.T) {
+	for _, extra := range []string{`"tool_response":"done"`, `"tool_response":[{"type":"text"}]`, `"tool_input":"ls"`} {
+		ing := &fakeIngester{}
+		body := `{"session_id":"s1","hook_event_name":"PostToolUse","tool_use_id":"toolu_1",` + extra + `}`
+		resp := post(t, ing, testToken, body)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status = %d, want 200", extra, resp.StatusCode)
+		}
+		if len(ing.got) != 1 || string(ing.got[0].Payload) != body {
+			t.Errorf("%s: payload must be stored unchanged: %+v", extra, ing.got)
+		}
 	}
 }
 

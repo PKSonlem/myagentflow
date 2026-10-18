@@ -30,7 +30,7 @@ const (
 )
 
 type Ingester interface {
-	Ingest(ctx context.Context, e ingest.Event) error
+	Ingest(ctx context.Context, e ingest.HookEvent) error
 }
 
 // Reader отдаёт данные для Read API; ErrNotFound и ErrInvalidCursor пакета reader превращаются в 404 и 400.

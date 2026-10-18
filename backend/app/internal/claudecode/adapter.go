@@ -25,18 +25,18 @@ type hook struct {
 
 // Parse разбирает тело хука. raw сохраняется без изменений в Event.Payload.
 // Неизвестный hook_event_name и неизвестные поля не ошибка.
-func Parse(raw []byte, receivedAt time.Time) (ingest.Event, error) {
+func Parse(raw []byte, receivedAt time.Time) (ingest.HookEvent, error) {
 	var h hook
 	if err := json.Unmarshal(raw, &h); err != nil {
-		return ingest.Event{}, errors.Join(ErrInvalidPayload, err)
+		return ingest.HookEvent{}, errors.Join(ErrInvalidPayload, err)
 	}
 	if hasNUL(raw) {
-		return ingest.Event{}, errors.Join(ErrInvalidPayload, errors.New("NUL character (\\u0000) is not supported"))
+		return ingest.HookEvent{}, errors.Join(ErrInvalidPayload, errors.New("NUL character (\\u0000) is not supported"))
 	}
 	if h.SessionID == "" || h.HookEventName == "" {
-		return ingest.Event{}, errors.Join(ErrInvalidPayload, errors.New("session_id and hook_event_name are required"))
+		return ingest.HookEvent{}, errors.Join(ErrInvalidPayload, errors.New("session_id and hook_event_name are required"))
 	}
-	return ingest.Event{
+	return ingest.HookEvent{
 		SessionID:     h.SessionID,
 		HookEventName: h.HookEventName,
 		Cwd:           h.Cwd,

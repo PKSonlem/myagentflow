@@ -101,16 +101,16 @@ type ClaudeHookPayload struct {
 	// Example: startup
 	Source *string `json:"source,omitempty"`
 
-	// ToolInput аргументы вызова инструмента, структура зависит от инструмента
-	ToolInput *map[string]interface{} `json:"tool_input,omitempty"`
+	// ToolInput аргументы вызова инструмента; структура зависит от инструмента, любой JSON
+	ToolInput interface{} `json:"tool_input,omitempty"`
 
 	// ToolName имя инструмента, только события с инструментами
 	//
 	// Example: Bash
 	ToolName *string `json:"tool_name,omitempty"`
 
-	// ToolResponse результат инструмента, только PostToolUse
-	ToolResponse *map[string]interface{} `json:"tool_response,omitempty"`
+	// ToolResponse результат инструмента, только PostToolUse; бывает объектом, строкой или массивом (например, у MCP-инструментов)
+	ToolResponse interface{} `json:"tool_response,omitempty"`
 
 	// ToolUseId идентификатор вызова инструмента
 	//
@@ -448,11 +448,9 @@ func (a ClaudeHookPayload) MarshalJSON() ([]byte, error) {
 		}
 	}
 
-	if a.ToolInput != nil {
-		object["tool_input"], err = json.Marshal(a.ToolInput)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'tool_input': %w", err)
-		}
+	object["tool_input"], err = json.Marshal(a.ToolInput)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'tool_input': %w", err)
 	}
 
 	if a.ToolName != nil {
@@ -462,11 +460,9 @@ func (a ClaudeHookPayload) MarshalJSON() ([]byte, error) {
 		}
 	}
 
-	if a.ToolResponse != nil {
-		object["tool_response"], err = json.Marshal(a.ToolResponse)
-		if err != nil {
-			return nil, fmt.Errorf("error marshaling 'tool_response': %w", err)
-		}
+	object["tool_response"], err = json.Marshal(a.ToolResponse)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'tool_response': %w", err)
 	}
 
 	if a.ToolUseId != nil {

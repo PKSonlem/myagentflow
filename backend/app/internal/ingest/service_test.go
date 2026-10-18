@@ -78,8 +78,8 @@ func newService(t *testing.T) *ingest.Service {
 }
 
 // ev собирает событие хука; tool_use_id пустая строка значит «нет».
-func ev(session, name, toolUseID string) ingest.Event {
-	e := ingest.Event{
+func ev(session, name, toolUseID string) ingest.HookEvent {
+	e := ingest.HookEvent{
 		SessionID:     session,
 		HookEventName: name,
 		Cwd:           "/work",
@@ -92,7 +92,7 @@ func ev(session, name, toolUseID string) ingest.Event {
 	return e
 }
 
-func mustIngest(t *testing.T, svc *ingest.Service, e ingest.Event) {
+func mustIngest(t *testing.T, svc *ingest.Service, e ingest.HookEvent) {
 	t.Helper()
 	if err := svc.Ingest(context.Background(), e); err != nil {
 		t.Fatalf("ingest %s: %v", e.HookEventName, err)
@@ -186,6 +186,16 @@ func TestIngest_SessionEndFinishesAndAnyEventReopens(t *testing.T) {
 				t.Fatalf("runs = %d, want 1", got)
 			}
 		})
+	}
+}
+
+func TestIngest_DuplicateDoesNotReopenFinishedRun(t *testing.T) {
+	svc := newService(t)
+	mustIngest(t, svc, ev("s1", "PostToolUse", "toolu_1"))
+	mustIngest(t, svc, ev("s1", "SessionEnd", ""))
+	mustIngest(t, svc, ev("s1", "PostToolUse", "toolu_1")) // запоздавший повтор
+	if got := count(t, "SELECT count(*) FROM runs WHERE status='finished' AND finished_at IS NOT NULL"); got != 1 {
+		t.Fatalf("finished runs = %d, want 1", got)
 	}
 }
 

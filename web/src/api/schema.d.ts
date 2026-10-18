@@ -120,19 +120,15 @@ export interface components {
              * @example Bash
              */
             tool_name?: string;
-            /** @description аргументы вызова инструмента, структура зависит от инструмента */
-            tool_input?: {
-                [key: string]: unknown;
-            };
+            /** @description аргументы вызова инструмента; структура зависит от инструмента, любой JSON */
+            tool_input?: unknown;
             /**
              * @description идентификатор вызова инструмента
              * @example toolu_01ABC123
              */
             tool_use_id?: string;
-            /** @description результат инструмента, только PostToolUse */
-            tool_response?: {
-                [key: string]: unknown;
-            };
+            /** @description результат инструмента, только PostToolUse; бывает объектом, строкой или массивом (например, у MCP-инструментов) */
+            tool_response?: unknown;
             /** @description текст ошибки, только PostToolUseFailure */
             error?: string;
             /** @description текст сообщения пользователя, только UserPromptSubmit */

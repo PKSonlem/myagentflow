@@ -90,7 +90,7 @@ func clean(t *testing.T) {
 // send кладёт событие через Ingest: данные те же, что в бою.
 func send(t *testing.T, session, name, toolUseID string, at time.Time) {
 	t.Helper()
-	e := ingest.Event{
+	e := ingest.HookEvent{
 		SessionID:     session,
 		HookEventName: name,
 		Cwd:           "/work",

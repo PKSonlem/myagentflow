@@ -2,16 +2,20 @@
 -- Находит Run по session_id или создаёт его. Возвращает id.
 -- ON CONFLICT DO UPDATE берёт блокировку строки до конца транзакции: на ней держится
 -- последовательная нумерация seq (параллельные запросы одного Run ждут друг друга).
--- Любое событие переводит Run обратно в running
--- (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md);
--- SessionEnd затем закрывает его через FinishRun в той же транзакции.
+-- Run не переоткрывается здесь: дубль события (его отбросит InsertEvent) не должен
+-- менять статус. Переоткрытие делает ReopenRun, только если событие реально записано.
 INSERT INTO runs (id, session_id, cwd, status, started_at)
 VALUES (@id, @session_id, @cwd, 'running', @started_at)
 ON CONFLICT (session_id) DO UPDATE SET
-    status      = 'running',
-    finished_at = NULL,
     cwd         = CASE WHEN runs.cwd = '' THEN EXCLUDED.cwd ELSE runs.cwd END
 RETURNING id;
+
+-- name: ReopenRun :exec
+-- Новое событие в сессии переводит Run обратно в running
+-- (resume не шлёт SessionStart по http, см. docs/notes/hooks-reality.md).
+UPDATE runs
+SET status = 'running', finished_at = NULL
+WHERE id = @id AND status <> 'running';
 
 -- name: FinishRun :exec
 UPDATE runs
